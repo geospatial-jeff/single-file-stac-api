@@ -6,7 +6,7 @@ from urllib.parse import urljoin
 
 from rtree import index
 from stac_api import config
-from stac_api.clients.base import BaseCoreClient, NumType
+from stac_api.clients.base import BaseCoreClient, BaseTransactionsClient, NumType
 from stac_api.models import schemas
 from stac_api.models.links import CollectionLinks, ItemLinks
 from stac_pydantic import Collection, Item, ItemCollection
@@ -53,7 +53,7 @@ class Database:
 
 
 @dataclass
-class SingleFileClient(BaseCoreClient):
+class SingleFileClient(BaseTransactionsClient, BaseCoreClient):
     """application logic"""
 
     db: Database
@@ -190,3 +190,39 @@ class SingleFileClient(BaseCoreClient):
         # Do the request
         search_request = schemas.STACSearch(**base_args)
         return self.post_search(search_request, request=kwargs["request"])
+
+    def create_collection(
+        self, model: schemas.Collection, **kwargs
+    ) -> schemas.Collection:
+        """POST /collections"""
+        self.db.insert_collection(model)
+        return model
+
+    def create_item(self, model: schemas.Item, **kwargs) -> schemas.Item:
+        """POST /collections/{collectionId}/items"""
+        self.db.insert_item(model)
+        return model
+
+    def delete_collection(self, id: str, **kwargs) -> schemas.Collection:
+        """DELETE /collections/{collectionId}"""
+        for idx, collection in enumerate(self.db.collections):
+            if collection.id == id:
+                break
+        self.db.collections.pop(idx)
+
+    def delete_item(self, id: str, **kwargs) -> schemas.Item:
+        """DELETE /collections/{collectionId}/items/{itemId}"""
+        # TODO: I have no idea how to remove something from an `rtree.index.Index`
+        raise NotImplementedError
+
+    def update_collection(
+        self, model: schemas.Collection, **kwargs
+    ) -> schemas.Collection:
+        """PUT /collections/{collectionId}"""
+        self.delete_collection(model.id)
+        self.db.insert_collection(model)
+
+    def update_item(self, model: schemas.Item, **kwargs) -> schemas.Item:
+        # TODO: Same
+        """PUT /collections/{collectionId}/items/{itemId}"""
+        raise NotImplementedError
