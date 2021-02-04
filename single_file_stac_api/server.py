@@ -24,6 +24,16 @@ class Application:
     client: SingleFileClient
     settings: ApiSettings
 
+    @classmethod
+    def from_file(cls, filename: str):
+        """create from file."""
+        settings = ApiSettings()
+        inject_settings(settings)
+        return cls(
+            client=SingleFileClient.from_file(filename),
+            settings=settings,
+        )
+
     def __post_init__(self):
         """post init hook."""
         self.stac_api = StacApi(
@@ -44,8 +54,5 @@ class Application:
 
 def start_application(filename: str):
     """start the application."""
-
-    settings = ApiSettings()
-    inject_settings(settings)
-    app = Application(client=SingleFileClient.from_file(filename), settings=settings)
+    app = Application.from_file(filename)
     app.run()

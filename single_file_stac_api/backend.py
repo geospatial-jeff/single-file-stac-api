@@ -76,6 +76,7 @@ class SingleFileClient(BaseTransactionsClient, BaseCoreClient):
         """GET /"""
         return LandingPage(
             title="Single File STAC",
+            description="Single File STAC",
             links=[
                 Link(
                     rel=Relations.self,
