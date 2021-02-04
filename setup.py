@@ -31,4 +31,5 @@ setup(
     packages=find_packages(exclude=["tests"]),
     include_package_data=True,
     install_requires=requirements,
+    entry_points={"console_scripts": ["sfs-api=single_file_stac_api.cli:api"]},
 )
