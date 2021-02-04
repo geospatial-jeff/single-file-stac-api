@@ -4,8 +4,11 @@ from setuptools import find_packages, setup
 with open("README.md") as f:
     desc = f.read()
 
-with open("./requirements.txt") as reqs:
-    requirements = [line.rstrip() for line in reqs]
+extra_reqs = {
+    "dev": ["pytest", "pytest-cov", "pre-commit", "tox"],
+}
+
+install_requires = ["arturo-stac-api", "rtree"]
 
 setup(
     name="single-file-stac-api",
@@ -17,7 +20,7 @@ setup(
     author_email="geospatialjeff@gmail.com",
     url="https://github.com/geospatial-jeff/single-file-stac-api",
     license="mit",
-    python_requires=">=3.7",
+    python_requires=">=3.8",
     classifiers=[
         "Intended Audience :: Developers",
         "Intended Audience :: Information Technology",
@@ -30,6 +33,8 @@ setup(
     keywords="STAC",
     packages=find_packages(exclude=["tests"]),
     include_package_data=True,
-    install_requires=requirements,
+    install_requires=install_requires,
+    extras_require=extra_reqs,
+    tests_require=extra_reqs["dev"],
     entry_points={"console_scripts": ["sfs-api=single_file_stac_api.cli:api"]},
 )
