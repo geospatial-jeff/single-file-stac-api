@@ -8,7 +8,7 @@ extra_reqs = {
     "dev": ["pytest", "pytest-cov", "pre-commit", "tox"],
 }
 
-install_requires = ["arturo-stac-api", "rtree"]
+install_requires = ["arturo-stac-api", "pygeos"]
 
 setup(
     name="single-file-stac-api",
