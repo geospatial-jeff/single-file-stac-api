@@ -285,13 +285,18 @@ class SingleFileClient(BaseTransactionsClient, BaseCoreClient, PaginationTokenCl
                     _, end = search_request.datetime
                     items = list(filter(lambda x: x.datetime <= end, items))
 
-            # TODO: QUERY
-            # # Query fields
-            # if search_request.query:
-            #     for (field_name, expr) in search_request.query.items():
-            #         field = self.item_table.get_field(field_name)
-            #         for (op, value) in expr.items():
-            #             query = query.filter(op.operator(field, value))
+            # Query fields
+            if search_request.query:
+                for (field_name, expr) in search_request.query.items():
+                    for (op, value) in expr.items():
+                        items = list(
+                            filter(
+                                lambda x: op.operator(
+                                    getattr(x.properties, field_name), value
+                                ),
+                                items,
+                            )
+                        )
 
             pages = Paging(items, limit=search_request.limit)
             page = pages.get_page(token)
