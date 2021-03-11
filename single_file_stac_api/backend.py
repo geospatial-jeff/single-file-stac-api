@@ -21,19 +21,14 @@ from stac_pydantic.api.extensions.paging import PaginationLink
 from stac_pydantic.extensions.single_file_stac import SingleFileStac
 from stac_pydantic.shared import Link, MimeTypes, Relations
 
-from single_file_stac_api.config import settings
-
 
 @attr.s
 class Database:
-    """cheapo spatial database.
+    """cheapo spatial database using STRtree."""
 
-    https://rtree.readthedocs.io/en/latest/tutorial.html#using-rtree-as-a-cheapo-spatial-database
-    """
-
-    host: str = attr.ib(default=f"http://{settings.host}:{settings.port}")
-    collections: List[Collection] = attr.ib(factory=list)
-    items: List[Item] = attr.ib(factory=list)
+    host: str = attr.ib(default="http://localhost")
+    collections: List[Collection] = attr.ib(init=False, factory=list)
+    items: List[Item] = attr.ib(init=False, factory=list)
 
     index: STRtree = STRtree([])
 
@@ -64,8 +59,16 @@ class Database:
 
     def insert_item(self, item: Item):
         """Insert items into the database."""
-        # re-create STRtree from items
-        raise NotImplementedError
+        item_links = ItemLinks(
+            collection_id=item.collection, item_id=item.id, base_url=self.host
+        ).create_links()
+        item.links += item_links
+        self.items.append(item)
+
+        # because STRtree is read-only we need to re-create it
+        self.index = STRtree(
+            [polygons(item.geometry.coordinates[0]) for item in self.items]
+        )
 
     def insert_collection(self, collection: Collection):
         """Insert collection into the database."""
@@ -114,20 +117,24 @@ class Paging:
     def __attrs_post_init__(self):
         """Post Init."""
         num_pages = len(list(range(0, len(self.items), self.limit)))
-        self.pages = [
-            Page(
-                items=self.items[i : i + self.limit],
-                num=idx,
-                has_next=(0 <= idx < num_pages - 1),
-                has_previous=(0 < idx),
-            )
-            for idx, i in enumerate(range(0, len(self.items), self.limit))
-        ]
+        if not len(self.items):
+            self.pages = [Page()]
+        else:
+            self.pages = [
+                Page(
+                    items=self.items[i : i + self.limit],
+                    num=idx,
+                    has_next=(0 <= idx < num_pages - 1),
+                    has_previous=(0 < idx),
+                )
+                for idx, i in enumerate(range(0, len(self.items), self.limit))
+            ]
 
     def get_page(self, page_number=None):
         """return page."""
         if not page_number:
             page_number = 0
+
         return list(filter(lambda x: x.num == page_number, self.pages))[0]
 
 
@@ -135,7 +142,7 @@ class Paging:
 class Page:
     """Simple Page model."""
 
-    items: List = attr.ib()
+    items: List = attr.ib(factory=list)
     num: int = attr.ib(default=0)
     has_next: bool = attr.ib(default=False)
     has_previous: bool = attr.ib(default=False)
@@ -145,16 +152,18 @@ class Page:
 class SingleFileClient(BaseTransactionsClient, BaseCoreClient, PaginationTokenClient):
     """application logic"""
 
-    db: Database = attr.ib(factory=Database)
+    filepath: str = attr.ib(kw_only=True)
+    host: str = attr.ib(kw_only=True, default="http://localhost")
 
-    @classmethod
-    def from_file(cls, filename: str):
-        """create from file."""
-        data = SingleFileStac.parse_file(filename)
-        db = Database()
-        db.bulk_insert_collections(data.collections)
-        db.bulk_insert_items(data.features)
-        return cls(db=db)
+    db: Database = attr.ib(init=False)
+
+    def __attrs_post_init__(self):
+        """post-init, create DB and fill with data."""
+        self.db = Database(host=self.host)
+        # Insert items and collections
+        data = SingleFileStac.parse_file(self.filepath)
+        self.db.bulk_insert_collections(data.collections)
+        self.db.bulk_insert_items(data.features)
 
     def landing_page(self, **kwargs) -> LandingPage:
         """GET /"""
@@ -433,9 +442,8 @@ class SingleFileClient(BaseTransactionsClient, BaseCoreClient, PaginationTokenCl
 
     def create_item(self, model: schemas.Item, **kwargs) -> schemas.Item:
         """POST /collections/{collectionId}/items"""
-        # self.db.insert_item(model)
-        # return model
-        raise NotImplementedError
+        self.db.insert_item(model)
+        return model
 
     def delete_collection(self, id: str, **kwargs) -> schemas.Collection:
         """DELETE /collections/{collectionId}"""

@@ -1,6 +1,7 @@
 """single_file_stac_api.server"""
-from dataclasses import dataclass
+from typing import Optional
 
+import attr
 import uvicorn
 from stac_api.api.app import StacApi, inject_settings
 from stac_api.api.extensions import (
@@ -10,19 +11,27 @@ from stac_api.api.extensions import (
 )
 
 from single_file_stac_api.backend import SingleFileClient
-from single_file_stac_api.config import settings
+from single_file_stac_api.config import ApiSettings
 
 
-@dataclass
+@attr.s
 class Application:
     """api application."""
 
-    client: SingleFileClient
+    client: SingleFileClient = attr.ib()
+    host: Optional[str] = attr.ib(default="localhost")
+    port: Optional[int] = attr.ib(default=8005)
 
-    def __post_init__(self):
+    settings: ApiSettings = attr.ib(init=False)
+    stac_api: StacApi = attr.ib(init=False)
+
+    def __attrs_post_init__(self):
         """post init hook."""
+        self.settings = ApiSettings(host=self.host, port=self.port)
+        inject_settings(self.settings)
+
         self.stac_api = StacApi(
-            settings=settings,
+            settings=self.settings,
             client=self.client,
             extensions=[
                 TransactionExtension(client=self.client),
@@ -31,23 +40,11 @@ class Application:
             ],
         )
 
-    @classmethod
-    def from_file(cls, filename: str):
-        """create from file."""
-        inject_settings(settings)
-        return cls(client=SingleFileClient.from_file(filename))
-
     def run(self):
         """serve the application."""
         uvicorn.run(
             app=self.stac_api.app,
-            host=settings.host,
-            port=settings.port,
+            host=self.settings.host,
+            port=self.settings.port,
             log_level="info",
         )
-
-
-def start_application(filename: str):
-    """start the application."""
-    app = Application.from_file(filename)
-    app.run()
