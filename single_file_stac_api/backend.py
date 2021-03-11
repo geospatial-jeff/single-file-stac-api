@@ -26,43 +26,24 @@ from stac_pydantic.shared import Link, MimeTypes, Relations
 class Database:
     """cheapo spatial database using STRtree."""
 
-    host: str = attr.ib(default="http://localhost")
-    collections: List[Collection] = attr.ib(init=False, factory=list)
-    items: List[Item] = attr.ib(init=False, factory=list)
+    collections: List[Collection] = attr.ib(factory=list)
+    items: List[Item] = attr.ib(factory=list)
 
-    index: STRtree = STRtree([])
+    index: STRtree = attr.ib(init=False)
+
+    def __attrs_post_init__(self):
+        """Post Init: create index."""
+        self.index = STRtree(
+            [polygons(item.geometry.coordinates[0]) for item in self.items]
+        )
 
     def intersects(self, geom: Geometry):
         """find all items which intersect the bbox."""
         idx = self.index.query(geom, predicate="intersects").tolist()
         return [self.items[n] for n in idx]
 
-    def bulk_insert_items(self, items: List[Item]):
-        """Insert items into the database."""
-        for item in items:
-            item_links = ItemLinks(
-                collection_id=item.collection, item_id=item.id, base_url=self.host
-            ).create_links()
-            item.links += item_links
-            self.items.append(item)
-
-        self.index = STRtree([polygons(item.geometry.coordinates[0]) for item in items])
-
-    def bulk_insert_collections(self, collections: List[Collection]):
-        """Insert collections into the database."""
-        for collection in collections:
-            collection_links = CollectionLinks(
-                collection_id=collection.id, base_url=self.host
-            ).create_links()
-            collection.links += collection_links
-            self.collections.append(collection)
-
     def insert_item(self, item: Item):
         """Insert items into the database."""
-        item_links = ItemLinks(
-            collection_id=item.collection, item_id=item.id, base_url=self.host
-        ).create_links()
-        item.links += item_links
         self.items.append(item)
 
         # because STRtree is read-only we need to re-create it
@@ -72,10 +53,6 @@ class Database:
 
     def insert_collection(self, collection: Collection):
         """Insert collection into the database."""
-        collection_links = CollectionLinks(
-            collection_id=collection.id, base_url=self.host
-        ).create_links()
-        collection.links += collection_links
         self.collections.append(collection)
 
 
@@ -153,17 +130,12 @@ class SingleFileClient(BaseTransactionsClient, BaseCoreClient, PaginationTokenCl
     """application logic"""
 
     filepath: str = attr.ib(kw_only=True)
-    host: str = attr.ib(kw_only=True, default="http://localhost")
-
     db: Database = attr.ib(init=False)
 
     def __attrs_post_init__(self):
         """post-init, create DB and fill with data."""
-        self.db = Database(host=self.host)
-        # Insert items and collections
         data = SingleFileStac.parse_file(self.filepath)
-        self.db.bulk_insert_collections(data.collections)
-        self.db.bulk_insert_items(data.features)
+        self.db = Database(data.collections, data.features)
 
     def landing_page(self, **kwargs) -> LandingPage:
         """GET /"""
@@ -206,36 +178,61 @@ class SingleFileClient(BaseTransactionsClient, BaseCoreClient, PaginationTokenCl
             ]
         )
 
-    def all_collections(self, **kwargs) -> List[schemas.Collection]:
-        """GET /collections"""
-        return self.db.collections
+    def _update_collection_links(self, collection: Collection, url: str) -> Collection:
+        links = (
+            collection.links
+            + CollectionLinks(collection_id=collection.id, base_url=url).create_links()
+        )
+        return collection.copy(update={"links": links}, deep=True)
 
-    def get_collection(self, id: str, **kwargs) -> schemas.Collection:
+    def _update_items_links(self, item: Item, url: str) -> Item:
+        links = (
+            item.links
+            + ItemLinks(
+                collection_id=item.collection, item_id=item.id, base_url=url
+            ).create_links()
+        )
+        return item.copy(update={"links": links}, deep=True)
+
+    def all_collections(self, **kwargs) -> List[Collection]:
+        """GET /collections"""
+        base_url = str(kwargs["request"].base_url)
+        return [
+            self._update_collection_links(collection, base_url)
+            for collection in self.db.collections
+        ]
+
+    def get_collection(self, id: str, **kwargs) -> Collection:
         """GET /collections/{collectionId}"""
+        base_url = str(kwargs["request"].base_url)
         for coll in self.db.collections:
             if coll.id == id:
-                return coll
+                return self._update_collection_links(coll, base_url)
 
     def item_collection(
         self, id: str, limit: int = 10, token: str = None, **kwargs
     ) -> ItemCollection:
         """GET /collections/{collectionId}/items"""
+        base_url = str(kwargs["request"].base_url)
         matches = []
         for item in self.db.items:
             if item.collection == id:
-                matches.append(item)
+                matches.append(self._update_items_links(item, base_url))
         return ItemCollection(features=matches, links=[])
 
     def get_item(self, id: str, **kwargs) -> schemas.Item:
         """GET /collections/{collectionId}/items/{itemId}"""
+        base_url = str(kwargs["request"].base_url)
         for item in self.db.items:
             if item.id == id:
-                return item
+                return self._update_items_links(item, base_url)
 
     def post_search(
         self, search_request: schemas.STACSearch, **kwargs
     ) -> Dict[str, Any]:
         """POST /search"""
+        base_url = str(kwargs["request"].base_url)
+
         count = None
         token = self.get_token(search_request.token) if search_request.token else False
 
@@ -310,7 +307,7 @@ class SingleFileClient(BaseTransactionsClient, BaseCoreClient, PaginationTokenCl
                 PaginationLink(
                     rel=Relations.next,
                     type="application/geo+json",
-                    href=f"{kwargs['request'].base_url}search",
+                    href=urljoin(base_url, "/search"),
                     method="POST",
                     body={"token": next_page},
                     merge=True,
@@ -323,7 +320,7 @@ class SingleFileClient(BaseTransactionsClient, BaseCoreClient, PaginationTokenCl
                 PaginationLink(
                     rel=Relations.previous,
                     type="application/geo+json",
-                    href=f"{kwargs['request'].base_url}search",
+                    href=urljoin(base_url, "/search"),
                     method="POST",
                     body={"token": previous_page},
                     merge=True,
@@ -342,6 +339,7 @@ class SingleFileClient(BaseTransactionsClient, BaseCoreClient, PaginationTokenCl
             # item.base_url = str(kwargs["request"].base_url)
             xvals += [item.bbox[0], item.bbox[2]]
             yvals += [item.bbox[1], item.bbox[3]]
+            item = self._update_items_links(item, base_url)
             response_features.append(item.to_dict(**filter_kwargs))
 
         try:
@@ -442,20 +440,21 @@ class SingleFileClient(BaseTransactionsClient, BaseCoreClient, PaginationTokenCl
         self, model: schemas.Collection, **kwargs
     ) -> schemas.Collection:
         """POST /collections"""
+        base_url = str(kwargs["request"].base_url)
         self.db.insert_collection(model)
-        return model
+        collection = self._update_collection_links(model, base_url)
+        return collection
 
     def create_item(self, model: schemas.Item, **kwargs) -> schemas.Item:
         """POST /collections/{collectionId}/items"""
+        base_url = str(kwargs["request"].base_url)
         self.db.insert_item(model)
-        return model
+        item = self._update_items_links(model, base_url)
+        return item
 
     def delete_collection(self, id: str, **kwargs) -> schemas.Collection:
         """DELETE /collections/{collectionId}"""
-        for idx, collection in enumerate(self.db.collections):
-            if collection.id == id:
-                break
-        self.db.collections.pop(idx)
+        raise NotImplementedError
 
     def delete_item(self, id: str, **kwargs) -> schemas.Item:
         """DELETE /collections/{collectionId}/items/{itemId}"""
@@ -466,8 +465,7 @@ class SingleFileClient(BaseTransactionsClient, BaseCoreClient, PaginationTokenCl
         self, model: schemas.Collection, **kwargs
     ) -> schemas.Collection:
         """PUT /collections/{collectionId}"""
-        self.delete_collection(model.id)
-        self.db.insert_collection(model)
+        raise NotImplementedError
 
     def update_item(self, model: schemas.Item, **kwargs) -> schemas.Item:
         # TODO: Same

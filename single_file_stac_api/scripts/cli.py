@@ -16,6 +16,6 @@ from single_file_stac_api.server import Application
 @click.option("--port", type=int, default=8005, help="Webserver port (default: 8005)")
 def api(filepath, host, port):
     """start the api."""
-    client = SingleFileClient(filepath=filepath, host=f"http://{host}:{port}")
+    client = SingleFileClient(filepath=filepath)
     app = Application(client, host=host, port=port)
     app.run()
