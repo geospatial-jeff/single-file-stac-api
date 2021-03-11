@@ -44,6 +44,7 @@ class Database:
 
     def insert_item(self, item: Item):
         """Insert items into the database."""
+        # TODO: make sure the item doesn't exist yet
         self.items.append(item)
 
         # because STRtree is read-only we need to re-create it
@@ -53,6 +54,7 @@ class Database:
 
     def insert_collection(self, collection: Collection):
         """Insert collection into the database."""
+        # TODO: make sure the collection doesn't exist yet
         self.collections.append(collection)
 
 
@@ -258,29 +260,26 @@ class SingleFileClient(BaseTransactionsClient, BaseCoreClient, PaginationTokenCl
             else:
                 items = self.db.items
 
-            if search_request.collections:
-                items = [
-                    item
-                    for item in items
-                    if item.collection in search_request.collections
-                ]
-
             # Temporal query
             if search_request.datetime:
                 # Two tailed query (between)
                 if ".." not in search_request.datetime:
                     start, end = search_request.datetime
-                    items = list(filter(lambda x: start <= x.datetime < end, items))
+                    items = list(
+                        filter(lambda x: start <= x.properties.datetime < end, items)
+                    )
 
                 # All items after the start date
                 if search_request.datetime[0] != "..":
                     start, _ = search_request.datetime
-                    items = list(filter(lambda x: start <= x.datetime, items))
+                    items = list(
+                        filter(lambda x: start <= x.properties.datetime, items)
+                    )
 
                 # All items before the end date
                 if search_request.datetime[1] != "..":
                     _, end = search_request.datetime
-                    items = list(filter(lambda x: x.datetime <= end, items))
+                    items = list(filter(lambda x: x.properties.datetime <= end, items))
 
             # Query fields
             if search_request.query:
@@ -294,6 +293,11 @@ class SingleFileClient(BaseTransactionsClient, BaseCoreClient, PaginationTokenCl
                                 items,
                             )
                         )
+
+            if search_request.collections:
+                items = list(
+                    filter(lambda x: x.collection in search_request.collections, items)
+                )
 
             pages = Paging(items, limit=search_request.limit)
             page = pages.get_page(token)

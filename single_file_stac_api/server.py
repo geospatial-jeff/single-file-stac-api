@@ -36,7 +36,18 @@ class Application:
             extensions=[
                 TransactionExtension(client=self.client),
                 ContextExtension(),
-                FieldsExtension(),
+                FieldsExtension(
+                    default_includes={
+                        "id",
+                        "type",
+                        "geometry",
+                        "bbox",
+                        "links",
+                        "assets",
+                        "collection",
+                        "properties.datetime",
+                    }
+                ),
             ],
         )
 

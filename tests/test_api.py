@@ -101,3 +101,109 @@ def test_post_search_intersects(app_client):
     for item in item_collection.features:
         geom = shape(item.geometry)
         assert geom.intersects(request_geom)
+
+
+def test_app_query_extension(app_client):
+    body = {"query": {"proj:epsg": {"gt": 10000}}}
+    resp = app_client.post("/search", json=body)
+    assert resp.status_code == 200
+    resp_json = resp.json()
+    assert len(resp_json["features"]) == 0
+
+
+def test_app_pagging(app_client):
+    body = {"limit": 1, "query": {"proj:epsg": {"lt": 10000}, "gsd": {"gt": 0.1}}}
+    resp = app_client.post("/search", json=body)
+    assert resp.status_code == 200
+    resp_json = resp.json()
+    assert resp_json["features"][0]["properties"]["gsd"]
+    assert resp_json["features"][0]["properties"]["proj:epsg"]
+    assert len(resp_json["features"]) == 1
+
+    next_link = list(filter(lambda x: x["rel"] == "next", resp_json["links"]))
+    assert next_link
+    previous_link = list(filter(lambda x: x["rel"] == "previous", resp_json["links"]))
+    assert not previous_link
+
+    body["token"] = next_link[0]["body"]["token"]
+    resp = app_client.post("/search", json=body)
+    assert resp.status_code == 200
+    resp_json_p2 = resp.json()
+    assert not resp_json["features"][0]["id"] == resp_json_p2["features"][0]["id"]
+
+    next_link = list(filter(lambda x: x["rel"] == "next", resp_json_p2["links"]))
+    assert next_link
+    previous_link = list(
+        filter(lambda x: x["rel"] == "previous", resp_json_p2["links"])
+    )
+    assert previous_link
+
+    body["token"] = previous_link[0]["body"]["token"]
+    resp = app_client.post("/search", json=body)
+    assert resp.status_code == 200
+    resp_json_p1 = resp.json()
+    assert resp_json["features"][0]["id"] == resp_json_p1["features"][0]["id"]
+
+    body["token"] = "NotAGoodToken"
+    resp = app_client.post("/search", json=body)
+    assert resp.status_code == 404
+
+
+def test_app_search_datetime(app_client):
+    body = {"limit": 1, "datetime": "2000-02-01T00:00:00Z/2000-02-03T00:00:00Z"}
+    resp = app_client.post("/search", json=body)
+    assert resp.status_code == 200
+    resp_json = resp.json()
+    assert resp_json["context"]["matched"] == 30
+    assert len(resp_json["features"]) == 1
+
+    body = {"limit": 1, "datetime": "../2000-02-03T00:00:00Z"}
+    resp = app_client.post("/search", json=body)
+    assert resp.status_code == 200
+    resp_json = resp.json()
+    assert resp_json["context"]["matched"] == 30
+    assert len(resp_json["features"]) == 1
+
+    body = {"limit": 1, "datetime": "2000-02-01T00:00:00Z/.."}
+    resp = app_client.post("/search", json=body)
+    assert resp.status_code == 200
+    resp_json = resp.json()
+    assert resp_json["context"]["matched"] == 30
+    assert len(resp_json["features"]) == 1
+
+    resp = app_client.get(
+        "/search", params={"datetime": "2000-02-01T00:00:00Z/2000-02-03T00:00:00Z"}
+    )
+    assert resp.status_code == 200
+    resp_json = resp.json()
+    assert resp_json["context"]["matched"] == 30
+
+
+def test_app_search_fields(app_client):
+    resp = app_client.get("/search", params={"limit": 1})
+    assert resp.status_code == 200
+    resp_json = resp.json()
+    assert resp_json["context"]["matched"] == 30
+    assert len(resp_json["features"]) == 1
+    assert list(resp_json["features"][0]["properties"]) == ["datetime"]
+
+    resp = app_client.get("/search", params={"limit": 1, "fields": ["+properties.gsd"]})
+    assert resp.status_code == 200
+    resp_json = resp.json()
+    assert resp_json["context"]["matched"] == 30
+    assert len(resp_json["features"]) == 1
+    assert "gsd" in list(resp_json["features"][0]["properties"])
+
+    resp = app_client.get("/search", params={"limit": 1, "fields": ["properties.gsd"]})
+    assert resp.status_code == 200
+    resp_json = resp.json()
+    assert resp_json["context"]["matched"] == 30
+    assert len(resp_json["features"]) == 1
+    assert "gsd" in list(resp_json["features"][0]["properties"])
+
+    resp = app_client.get("/search", params={"limit": 1, "fields": ["-links"]})
+    assert resp.status_code == 200
+    resp_json = resp.json()
+    assert resp_json["context"]["matched"] == 30
+    assert len(resp_json["features"]) == 1
+    assert "links" not in list(resp_json["features"][0])

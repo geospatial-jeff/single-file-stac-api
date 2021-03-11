@@ -16,7 +16,7 @@ def app_client():
     port = 8005
     filepath = os.path.join(DATA_DIR, "test-data.json")
 
-    client = SingleFileClient(filepath=filepath, host=f"http://{host}:{port}")
+    client = SingleFileClient(filepath=filepath)
     app = Application(client, host=host, port=port)
     with TestClient(app.stac_api.app) as test_client:
         yield test_client
