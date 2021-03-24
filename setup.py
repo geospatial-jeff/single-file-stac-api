@@ -36,5 +36,10 @@ setup(
     install_requires=install_requires,
     extras_require=extra_reqs,
     tests_require=extra_reqs["dev"],
-    entry_points={"console_scripts": ["sfs-api=single_file_stac_api.scripts.cli:api"]},
+    entry_points={
+        "console_scripts": [
+            "sfs-api=single_file_stac_api.scripts.cli:api",
+            "sfs-viewer=single_file_stac_api.scripts.cli:viz",
+        ]
+    },
 )
